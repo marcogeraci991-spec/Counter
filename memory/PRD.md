@@ -18,8 +18,8 @@ App mobile Expo React Native per il conteggio preciso di oggetti industriali (ba
 
 ## Stack Tecnologico
 - **Frontend**: Expo SDK 54, React Native, expo-router, react-native-svg, expo-image-picker
-- **Backend**: FastAPI (Python), emergentintegrations (GPT-4o vision)
-- **AI**: OpenAI GPT-4o per analisi immagini e conteggio
+- **Backend**: FastAPI (Python), Ultralytics YOLO11n, OpenCV
+- **AI**: YOLO11n (object detection) + OpenCV (Hough Circles, Watershed, Contour detection)
 - **Database**: MongoDB (per storico futuro)
 
 ## Endpoints API
