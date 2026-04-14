@@ -195,7 +195,7 @@ export default function AreaSelectScreen() {
             style={{ width: displayW, height: displayH }}
             resizeMode="cover"
           />
-          {/* SVG overlay using Mask for correct include/exclude logic */}
+          {/* SVG overlay - include areas use Mask, exclude areas as separate overlay */}
           <Svg
             style={StyleSheet.absoluteFill}
             width={displayW}
@@ -210,13 +210,9 @@ export default function AreaSelectScreen() {
                 {includeAreas.map((area, i) => (
                   <Path key={`inc-${i}`} d={pointsToPathD(area.points)} fill="black" />
                 ))}
-                {/* Exclude areas -> show overlay -> image dimmed */}
-                {excludeAreas.map((area, i) => (
-                  <Path key={`exc-${i}`} d={pointsToPathD(area.points)} fill="white" />
-                ))}
               </Mask>
             </Defs>
-            {/* Semi-transparent white overlay with mask holes */}
+            {/* Semi-transparent white overlay with holes for include areas */}
             <Rect
               x="0"
               y="0"
@@ -225,6 +221,14 @@ export default function AreaSelectScreen() {
               fill="rgba(255,255,255,0.55)"
               mask="url(#dimMask)"
             />
+            {/* Exclude areas: separate overlay patches drawn ON TOP to restore dimming */}
+            {excludeAreas.map((area, i) => (
+              <Path
+                key={`exc-overlay-${i}`}
+                d={pointsToPathD(area.points)}
+                fill="rgba(255,255,255,0.55)"
+              />
+            ))}
             {/* Current drawing path - dashed only */}
             {currentPoints.length > 1 && (
               <Path
