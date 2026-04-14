@@ -14,6 +14,7 @@ export interface Marker {
   id: number;
   x: number;
   y: number;
+  radius: number;
 }
 
 interface AppState {
@@ -111,7 +112,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const addMarker = useCallback((x: number, y: number) => {
     setState(prev => {
       const maxId = prev.markers.reduce((max, m) => Math.max(max, m.id), 0);
-      return { ...prev, markers: [...prev.markers, { id: maxId + 1, x, y }] };
+      const avgR = prev.markers.length > 0 ? prev.markers.reduce((s, m) => s + m.radius, 0) / prev.markers.length : 2;
+      return { ...prev, markers: [...prev.markers, { id: maxId + 1, x, y, radius: avgR }] };
     });
   }, []);
 

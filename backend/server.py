@@ -58,6 +58,7 @@ class DetectedObject(BaseModel):
     id: int
     x: float
     y: float
+    radius: float = 2.0
 
 class CountResponse(BaseModel):
     count: int
@@ -111,7 +112,7 @@ def detect_circles_hough(gray, mask_np, sensitivity=0.5):
             for (x, y, r) in circles[0]:
                 cx, cy = int(x), int(y)
                 if 0 <= cx < w and 0 <= cy < h and mask_np[cy, cx] > 0:
-                    valid.append({"x": float(x / w * 100), "y": float(y / h * 100)})
+                    valid.append({"x": float(x / w * 100), "y": float(y / h * 100), "radius": float(r / w * 100)})
             logger.info(f"  param2={param2}: {len(valid)} valid circles")
             if len(valid) > len(best_objects):
                 best_objects = valid
