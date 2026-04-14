@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Image,
   Alert,
   ActivityIndicator,
@@ -13,14 +12,13 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import Svg, { Path, Rect, Defs, ClipPath } from 'react-native-svg';
-import { useAppContext, Point, DrawnArea } from '../src/store/AppContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path, Rect, Defs, Mask } from 'react-native-svg';
+import { useAppContext, Point } from '../src/store/AppContext';
 import { Colors } from '../src/constants/colors';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
-const TOOLBAR_HEIGHT = 70;
-const TOPBAR_HEIGHT = 56;
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -31,6 +29,7 @@ function pointsToPathD(points: Point[]): string {
 
 export default function AreaSelectScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const {
     imageUri,
     imageBase64,
@@ -51,8 +50,11 @@ export default function AreaSelectScreen() {
   const currentPointsRef = useRef<Point[]>([]);
   const isDrawingRef = useRef(false);
 
+  const TOPBAR_H = 50;
+  const TOOLBAR_H = 60 + insets.bottom;
+
   // Calculate image display dimensions
-  const availableH = SCREEN_HEIGHT - TOPBAR_HEIGHT - TOOLBAR_HEIGHT - 80;
+  const availableH = SCREEN_HEIGHT - TOPBAR_H - TOOLBAR_H - insets.top - 16;
   const imgAspect = imageWidth && imageHeight ? imageWidth / imageHeight : 1;
   let displayW = SCREEN_WIDTH;
   let displayH = SCREEN_WIDTH / imgAspect;
@@ -107,19 +109,8 @@ export default function AreaSelectScreen() {
     })
   ).current;
 
-  // Build overlay path (full rect with holes for include areas)
   const includeAreas = areas.filter((a) => a.mode === 'include');
   const excludeAreas = areas.filter((a) => a.mode === 'exclude');
-
-  const buildOverlayPath = useCallback(() => {
-    let d = `M 0 0 L ${displayW} 0 L ${displayW} ${displayH} L 0 ${displayH} Z`;
-    includeAreas.forEach((area) => {
-      if (area.points.length >= 3) {
-        d += ' ' + pointsToPathD(area.points);
-      }
-    });
-    return d;
-  }, [includeAreas, displayW, displayH]);
 
   const handleCount = async () => {
     if (includeAreas.length === 0) {
@@ -153,9 +144,7 @@ export default function AreaSelectScreen() {
         body: JSON.stringify(body),
       });
 
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
       const data = await response.json();
       setMarkers(
@@ -176,30 +165,22 @@ export default function AreaSelectScreen() {
 
   if (!imageUri) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <Text style={styles.errorText}>Nessuna immagine selezionata</Text>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Top bar */}
       <View style={styles.topBar}>
-        <TouchableOpacity
-          testID="area-back-btn"
-          onPress={() => router.back()}
-          style={styles.backBtn}
-        >
-          <MaterialCommunityIcons name="arrow-left" size={24} color={Colors.textPrimary} />
+        <TouchableOpacity testID="area-back-btn" onPress={() => router.back()} style={styles.backBtn}>
+          <MaterialCommunityIcons name="arrow-left" size={22} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.topTitle}>Seleziona Area</Text>
-        <TouchableOpacity
-          testID="clear-areas-btn"
-          onPress={clearAreas}
-          style={styles.backBtn}
-        >
-          <MaterialCommunityIcons name="delete-outline" size={22} color={Colors.danger} />
+        <TouchableOpacity testID="clear-areas-btn" onPress={clearAreas} style={styles.backBtn}>
+          <MaterialCommunityIcons name="delete-outline" size={20} color={Colors.danger} />
         </TouchableOpacity>
       </View>
 
@@ -214,44 +195,40 @@ export default function AreaSelectScreen() {
             style={{ width: displayW, height: displayH }}
             resizeMode="cover"
           />
+          {/* SVG overlay using Mask for correct include/exclude logic */}
           <Svg
             style={StyleSheet.absoluteFill}
             width={displayW}
             height={displayH}
             pointerEvents="none"
           >
-            {/* Overlay with holes for include areas */}
-            <Path
-              d={buildOverlayPath()}
-              fill={Colors.overlayLight}
-              fillRule="evenodd"
+            <Defs>
+              <Mask id="dimMask">
+                {/* White = overlay visible (dimmed), Black = overlay hidden (bright) */}
+                <Rect x="0" y="0" width={displayW} height={displayH} fill="white" />
+                {/* Include areas -> hide overlay -> image visible */}
+                {includeAreas.map((area, i) => (
+                  <Path key={`inc-${i}`} d={pointsToPathD(area.points)} fill="black" />
+                ))}
+                {/* Exclude areas -> show overlay -> image dimmed */}
+                {excludeAreas.map((area, i) => (
+                  <Path key={`exc-${i}`} d={pointsToPathD(area.points)} fill="white" />
+                ))}
+              </Mask>
+            </Defs>
+            {/* Semi-transparent white overlay with mask holes */}
+            <Rect
+              x="0"
+              y="0"
+              width={displayW}
+              height={displayH}
+              fill="rgba(255,255,255,0.55)"
+              mask="url(#dimMask)"
             />
-            {/* Exclude areas on top */}
-            {excludeAreas.map((area, i) => (
-              <Path
-                key={`ex-fill-${i}`}
-                d={pointsToPathD(area.points)}
-                fill={Colors.overlayLight}
-              />
-            ))}
-            {/* Strokes for all drawn areas */}
-            {areas.map((area, i) => (
-              <Path
-                key={`stroke-${i}`}
-                d={pointsToPathD(area.points)}
-                stroke={area.mode === 'include' ? Colors.success : Colors.danger}
-                strokeWidth={2.5}
-                fill="none"
-              />
-            ))}
-            {/* Current drawing path */}
+            {/* Current drawing path - dashed only */}
             {currentPoints.length > 1 && (
               <Path
-                d={
-                  currentPoints
-                    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
-                    .join(' ')
-                }
+                d={currentPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
                 stroke={drawMode === 'include' ? Colors.success : Colors.danger}
                 strokeWidth={2.5}
                 fill="none"
@@ -263,68 +240,44 @@ export default function AreaSelectScreen() {
       </View>
 
       {/* Bottom toolbar */}
-      <View style={styles.toolbar}>
+      <View style={[styles.toolbar, { paddingBottom: insets.bottom + 8 }]}>
         <TouchableOpacity
           testID="include-mode-btn"
-          style={[
-            styles.modeBtn,
-            drawMode === 'include' && { backgroundColor: Colors.success },
-          ]}
+          style={[styles.modeBtn, drawMode === 'include' && { backgroundColor: Colors.success }]}
           onPress={() => setDrawMode('include')}
         >
           <MaterialCommunityIcons
             name="plus-circle-outline"
-            size={20}
+            size={18}
             color={drawMode === 'include' ? '#fff' : Colors.success}
           />
-          <Text
-            style={[
-              styles.modeBtnText,
-              drawMode === 'include' && { color: '#fff' },
-            ]}
-          >
+          <Text style={[styles.modeBtnText, drawMode === 'include' && { color: '#fff' }]}>
             Includi
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           testID="exclude-mode-btn"
-          style={[
-            styles.modeBtn,
-            drawMode === 'exclude' && { backgroundColor: Colors.danger },
-          ]}
+          style={[styles.modeBtn, drawMode === 'exclude' && { backgroundColor: Colors.danger }]}
           onPress={() => setDrawMode('exclude')}
         >
           <MaterialCommunityIcons
             name="minus-circle-outline"
-            size={20}
+            size={18}
             color={drawMode === 'exclude' ? '#fff' : Colors.danger}
           />
-          <Text
-            style={[
-              styles.modeBtnText,
-              drawMode === 'exclude' && { color: '#fff' },
-            ]}
-          >
+          <Text style={[styles.modeBtnText, drawMode === 'exclude' && { color: '#fff' }]}>
             Escludi
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          testID="undo-area-btn"
-          style={styles.modeBtn}
-          onPress={undoArea}
-        >
-          <MaterialCommunityIcons name="undo" size={20} color={Colors.textSecondary} />
-          <Text style={styles.modeBtnText}>Annulla</Text>
+        <TouchableOpacity testID="undo-area-btn" style={styles.modeBtn} onPress={undoArea}>
+          <MaterialCommunityIcons name="undo" size={18} color={Colors.textSecondary} />
         </TouchableOpacity>
 
         <TouchableOpacity
           testID="count-btn"
-          style={[
-            styles.countBtn,
-            includeAreas.length === 0 && { opacity: 0.4 },
-          ]}
+          style={[styles.countBtn, includeAreas.length === 0 && { opacity: 0.4 }]}
           onPress={handleCount}
           disabled={isLoading || includeAreas.length === 0}
         >
@@ -332,13 +285,13 @@ export default function AreaSelectScreen() {
             <ActivityIndicator color="#fff" size="small" />
           ) : (
             <>
-              <MaterialCommunityIcons name="counter" size={20} color="#fff" />
+              <MaterialCommunityIcons name="counter" size={18} color="#fff" />
               <Text style={styles.countBtnText}>Conta</Text>
             </>
           )}
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -351,20 +304,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    height: TOPBAR_HEIGHT,
+    paddingHorizontal: 12,
+    height: 50,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: Colors.surfaceElevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
   topTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
     color: Colors.textPrimary,
   },
@@ -375,7 +327,7 @@ const styles = StyleSheet.create({
   },
   canvas: {
     overflow: 'hidden',
-    borderRadius: 8,
+    borderRadius: 6,
   },
   errorText: {
     color: Colors.textTertiary,
@@ -387,9 +339,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    height: TOOLBAR_HEIGHT,
+    paddingHorizontal: 8,
+    paddingTop: 10,
     backgroundColor: Colors.surface,
     borderTopWidth: 1,
     borderTopColor: Colors.surfaceElevated,
@@ -398,27 +349,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: Colors.surfaceElevated,
   },
   modeBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: Colors.textSecondary,
   },
   countBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 18,
+    gap: 5,
+    paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
     backgroundColor: Colors.primary,
   },
   countBtnText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#fff',
   },

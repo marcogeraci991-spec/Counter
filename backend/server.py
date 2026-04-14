@@ -6,15 +6,14 @@ import os
 import logging
 import base64
 import json
-import re
 import uuid
 import io
+import numpy as np
+import cv2
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List
 from PIL import Image, ImageDraw
-
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -23,8 +22,6 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
-
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -36,9 +33,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# --- YOLO Model Loading ---
+YOLO_MODEL = None
+try:
+    from ultralytics import YOLO
+    model_path = ROOT_DIR / "yolo11n.pt"
+    if not model_path.exists():
+        logger.info("Downloading YOLO11n model...")
+        YOLO_MODEL = YOLO("yolo11n.pt")
+    else:
+        YOLO_MODEL = YOLO(str(model_path))
+    logger.info("YOLO model loaded successfully")
+except Exception as e:
+    logger.warning(f"Could not load YOLO model: {e}")
+    YOLO_MODEL = None
+
 
 # --- Models ---
-
 class PointModel(BaseModel):
     x: float
     y: float
@@ -63,22 +74,204 @@ class CountResponse(BaseModel):
     objects: List[DetectedObject]
 
 
-# --- Category descriptions for the AI prompt ---
-
-CATEGORY_DESCRIPTIONS = {
-    "barre_tonde": "round solid bars (circular cross-sections, like rebar or steel rods viewed from the end)",
-    "barre_quadre": "square solid bars (square cross-sections viewed from the end)",
-    "barre_rettangolari": "rectangular solid bars (rectangular cross-sections viewed from the end)",
-    "barre_esagonali": "hexagonal solid bars (hexagonal cross-sections viewed from the end)",
-    "barre_generiche": "solid bars of any shape (various cross-section geometries viewed from the end)",
-    "tubi_tondi": "round tubes or pipes (circular cross-sections with a hollow center, viewed from the end)",
-    "tubi_quadri": "square tubes (square cross-sections with a hollow center, viewed from the end)",
-    "tubi_rettangolari": "rectangular tubes (rectangular cross-sections with a hollow center, viewed from the end)",
-    "tubi_generici": "tubes or pipes of any shape (cross-sections with hollow center, viewed from the end)",
-    "profili_l": "L-shaped angle profiles (L-shaped cross-sections, viewed from the end)",
-    "profili_t": "T-shaped profiles (T-shaped cross-sections, viewed from the end)",
-    "travi_ipe": "IPE beams / I-beams / H-beams (I-shaped or H-shaped cross-sections, viewed from the end)",
+# --- Category types ---
+CIRCULAR_CATEGORIES = {
+    "barre_tonde", "barre_quadre", "barre_rettangolari",
+    "barre_esagonali", "barre_generiche",
+    "tubi_tondi", "tubi_quadri", "tubi_rettangolari", "tubi_generici",
 }
+PROFILE_CATEGORIES = {"profili_l", "profili_t", "travi_ipe"}
+
+
+# --- OpenCV Detection Functions ---
+
+def detect_circles_hough(gray, mask_np):
+    """Detect circular objects using Hough Circle Transform."""
+    h, w = gray.shape[:2]
+
+    # CLAHE for better contrast
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+
+    # Blur
+    blurred = cv2.GaussianBlur(enhanced, (9, 9), 2)
+
+    # Estimate circle size from image
+    min_dim = min(h, w)
+    min_r = max(3, int(min_dim * 0.005))
+    max_r = max(20, int(min_dim * 0.15))
+    min_dist = max(10, int(min_r * 1.5))
+
+    best_objects = []
+
+    # Try multiple param2 values to find optimal detection
+    for param2 in [25, 35, 45, 55]:
+        circles = cv2.HoughCircles(
+            blurred,
+            cv2.HOUGH_GRADIENT,
+            dp=1.2,
+            minDist=min_dist,
+            param1=100,
+            param2=param2,
+            minRadius=min_r,
+            maxRadius=max_r
+        )
+        if circles is not None:
+            valid = []
+            for (x, y, r) in circles[0]:
+                cx, cy = int(x), int(y)
+                if 0 <= cx < w and 0 <= cy < h and mask_np[cy, cx] > 0:
+                    valid.append({"x": float(x / w * 100), "y": float(y / h * 100)})
+            if len(valid) > len(best_objects):
+                best_objects = valid
+
+    return best_objects
+
+
+def detect_with_watershed(gray, mask_np):
+    """Detect objects using watershed segmentation - good for tightly packed objects."""
+    h, w = gray.shape[:2]
+
+    # CLAHE
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+
+    # Apply mask
+    enhanced = cv2.bitwise_and(enhanced, enhanced, mask=mask_np)
+
+    # Adaptive threshold
+    thresh = cv2.adaptiveThreshold(
+        enhanced, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        blockSize=21,
+        C=4
+    )
+
+    # Clean up
+    kernel = np.ones((3, 3), np.uint8)
+    cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=2)
+    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    # Distance transform
+    dist = cv2.distanceTransform(cleaned, cv2.DIST_L2, 5)
+    if dist.max() == 0:
+        return []
+
+    # Find sure foreground
+    _, sure_fg = cv2.threshold(dist, 0.4 * dist.max(), 255, 0)
+    sure_fg = np.uint8(sure_fg)
+
+    # Connected components
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(sure_fg)
+
+    min_area = max(20, (w * h) * 0.0003)
+    max_area = (w * h) * 0.15
+
+    objects = []
+    for i in range(1, num_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area < min_area or area > max_area:
+            continue
+        cx, cy = centroids[i]
+        cx_int, cy_int = int(cx), int(cy)
+        if 0 <= cx_int < w and 0 <= cy_int < h and mask_np[cy_int, cx_int] > 0:
+            objects.append({"x": float(cx / w * 100), "y": float(cy / h * 100)})
+
+    return objects
+
+
+def detect_contours(gray, mask_np):
+    """Detect objects using contour analysis - for non-circular shapes."""
+    h, w = gray.shape[:2]
+
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    enhanced = cv2.bitwise_and(enhanced, enhanced, mask=mask_np)
+
+    # Edge detection
+    edges = cv2.Canny(enhanced, 50, 150)
+
+    # Dilate to connect edges
+    kernel = np.ones((3, 3), np.uint8)
+    dilated = cv2.dilate(edges, kernel, iterations=2)
+
+    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    min_area = max(50, (w * h) * 0.001)
+    max_area = (w * h) * 0.2
+
+    objects = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area or area > max_area:
+            continue
+        M = cv2.moments(contour)
+        if M["m00"] == 0:
+            continue
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
+        if 0 <= cx < w and 0 <= cy < h and mask_np[cy, cx] > 0:
+            objects.append({"x": float(cx / w * 100), "y": float(cy / h * 100)})
+
+    return objects
+
+
+def detect_with_yolo(image_np, mask_np):
+    """Try YOLO detection on the image."""
+    if YOLO_MODEL is None:
+        return []
+
+    try:
+        results = YOLO_MODEL(image_np, verbose=False, conf=0.25)
+        h, w = image_np.shape[:2]
+        objects = []
+
+        for result in results:
+            if result.boxes is not None:
+                for box in result.boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    cx = (x1 + x2) / 2
+                    cy = (y1 + y2) / 2
+                    cx_int, cy_int = int(cx), int(cy)
+                    if 0 <= cx_int < w and 0 <= cy_int < h and mask_np[cy_int, cx_int] > 0:
+                        objects.append({
+                            "x": float(cx / w * 100),
+                            "y": float(cy / h * 100)
+                        })
+
+        return objects
+    except Exception as e:
+        logger.warning(f"YOLO detection error: {e}")
+        return []
+
+
+def merge_detections(detections_list, min_distance_pct=3.0):
+    """Merge multiple detection results, removing duplicates."""
+    all_objects = []
+    for detections in detections_list:
+        all_objects.extend(detections)
+
+    if not all_objects:
+        return []
+
+    # Remove near-duplicates
+    merged = [all_objects[0]]
+    for obj in all_objects[1:]:
+        is_dup = False
+        for existing in merged:
+            dist = ((obj["x"] - existing["x"]) ** 2 + (obj["y"] - existing["y"]) ** 2) ** 0.5
+            if dist < min_distance_pct:
+                is_dup = True
+                break
+        if not is_dup:
+            merged.append(obj)
+
+    # Assign sequential IDs
+    for i, obj in enumerate(merged):
+        obj["id"] = i + 1
+
+    return merged
 
 
 # --- Endpoints ---
@@ -93,16 +286,15 @@ async def count_objects(request: CountRequest):
     try:
         # Decode the image
         image_data = base64.b64decode(request.image_base64)
-        image = Image.open(io.BytesIO(image_data)).convert('RGB')
-        img_width, img_height = image.size
+        pil_image = Image.open(io.BytesIO(image_data)).convert('RGB')
+        img_width, img_height = pil_image.size
 
         logger.info(f"Processing image: {img_width}x{img_height}, category: {request.category}")
 
-        # Create mask from areas
-        mask = Image.new('L', (img_width, img_height), 0)
-        draw = ImageDraw.Draw(mask)
+        # Create mask from areas using PIL
+        mask_pil = Image.new('L', (img_width, img_height), 0)
+        draw = ImageDraw.Draw(mask_pil)
 
-        # Apply include areas
         for area in request.include_areas:
             if len(area.points) >= 3:
                 polygon = [
@@ -111,7 +303,6 @@ async def count_objects(request: CountRequest):
                 ]
                 draw.polygon(polygon, fill=255)
 
-        # Apply exclude areas
         for area in request.exclude_areas:
             if len(area.points) >= 3:
                 polygon = [
@@ -120,88 +311,74 @@ async def count_objects(request: CountRequest):
                 ]
                 draw.polygon(polygon, fill=0)
 
-        # Apply mask - gray out excluded areas
-        gray_bg = Image.new('RGB', (img_width, img_height), (100, 100, 100))
-        masked_image = Image.composite(image, gray_bg, mask)
+        # Convert to numpy arrays for OpenCV
+        image_np = np.array(pil_image)
+        image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+        mask_np = np.array(mask_pil)
 
-        # Resize if too large (save bandwidth)
+        # Apply mask to create masked image
+        masked_bgr = cv2.bitwise_and(image_bgr, image_bgr, mask=mask_np)
+        gray = cv2.cvtColor(masked_bgr, cv2.COLOR_BGR2GRAY)
+
+        # Resize if too large
         MAX_DIM = 2048
+        scale = 1.0
         if img_width > MAX_DIM or img_height > MAX_DIM:
-            ratio = min(MAX_DIM / img_width, MAX_DIM / img_height)
-            new_size = (int(img_width * ratio), int(img_height * ratio))
-            masked_image = masked_image.resize(new_size, Image.LANCZOS)
-            logger.info(f"Resized image to: {new_size}")
+            scale = min(MAX_DIM / img_width, MAX_DIM / img_height)
+            new_w, new_h = int(img_width * scale), int(img_height * scale)
+            image_bgr = cv2.resize(image_bgr, (new_w, new_h))
+            mask_np = cv2.resize(mask_np, (new_w, new_h))
+            gray = cv2.resize(gray, (new_w, new_h))
+            masked_bgr = cv2.resize(masked_bgr, (new_w, new_h))
+            logger.info(f"Resized to: {new_w}x{new_h}")
 
-        # Convert masked image to base64
-        buffer = io.BytesIO()
-        masked_image.save(buffer, format='JPEG', quality=85)
-        masked_b64 = base64.b64encode(buffer.getvalue()).decode()
+        # Run detections
+        all_detections = []
 
-        # Get category description
-        cat_desc = CATEGORY_DESCRIPTIONS.get(request.category, "objects")
+        # 1. YOLO detection
+        yolo_results = detect_with_yolo(masked_bgr, mask_np)
+        logger.info(f"YOLO detected: {len(yolo_results)} objects")
+        if yolo_results:
+            all_detections.append(yolo_results)
 
-        # Call GPT-4o for counting
-        session_id = f"count-{uuid.uuid4()}"
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message="""You are an expert industrial object counter. You analyze photographs of stacked metal bars, tubes, and structural profiles to count them with extreme precision.
+        # 2. OpenCV detection based on category
+        if request.category in CIRCULAR_CATEGORIES:
+            # Hough circles
+            hough_results = detect_circles_hough(gray, mask_np)
+            logger.info(f"Hough circles detected: {len(hough_results)} objects")
+            if hough_results:
+                all_detections.append(hough_results)
 
-CRITICAL RULES:
-1. ONLY count objects in the BRIGHT/CLEAR area of the image. The grayed-out areas must be COMPLETELY IGNORED.
-2. Count each DISTINCT object cross-section separately. Each bar end, tube end, or profile end is ONE object.
-3. Be extremely thorough - count EVERY visible object, including partially visible ones at edges.
-4. Provide the CENTER position of each object as a PERCENTAGE of the full image (x: 0-100, y: 0-100), where (0,0) is top-left.
-5. Return ONLY valid JSON, nothing else. No markdown, no explanation.
-6. When in doubt about whether something is an object or background, count it."""
+            # Watershed
+            watershed_results = detect_with_watershed(gray, mask_np)
+            logger.info(f"Watershed detected: {len(watershed_results)} objects")
+            if watershed_results:
+                all_detections.append(watershed_results)
+        else:
+            # Contour detection for profiles
+            contour_results = detect_contours(gray, mask_np)
+            logger.info(f"Contour detected: {len(contour_results)} objects")
+            if contour_results:
+                all_detections.append(contour_results)
+
+        # Pick the detection method with most results
+        if all_detections:
+            best_detection = max(all_detections, key=len)
+            # Assign IDs
+            for i, obj in enumerate(best_detection):
+                obj["id"] = i + 1
+            objects = best_detection
+        else:
+            objects = []
+
+        count = len(objects)
+        logger.info(f"Final count: {count} objects")
+
+        return CountResponse(
+            count=count,
+            objects=[DetectedObject(**obj) for obj in objects]
         )
-        chat.with_model("openai", "gpt-4o")
 
-        image_content = ImageContent(image_base64=masked_b64)
-
-        user_msg = UserMessage(
-            text=f"""Count ALL visible {cat_desc} in the bright/clear area of this image. The gray areas should be ignored completely.
-
-Return ONLY this JSON (no markdown, no extra text):
-{{"count": <number>, "objects": [{{"id": 1, "x": <x_percent_0_to_100>, "y": <y_percent_0_to_100>}}, ...]}}
-
-Count EVERY single visible {cat_desc}. Be extremely precise and thorough.""",
-            file_contents=[image_content]
-        )
-
-        logger.info("Sending image to GPT-4o for analysis...")
-        response = await chat.send_message(user_msg)
-        logger.info(f"GPT-4o response received: {response[:200]}...")
-
-        # Parse response - extract JSON
-        response_text = response.strip()
-
-        # Try to extract JSON from markdown code blocks
-        code_block = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response_text)
-        if code_block:
-            response_text = code_block.group(1).strip()
-        elif not response_text.startswith('{'):
-            start = response_text.find('{')
-            end = response_text.rfind('}')
-            if start != -1 and end != -1:
-                response_text = response_text[start:end + 1]
-
-        result = json.loads(response_text)
-
-        count = result.get("count", 0)
-        objects = [
-            DetectedObject(id=obj["id"], x=float(obj["x"]), y=float(obj["y"]))
-            for obj in result.get("objects", [])
-        ]
-
-        logger.info(f"Count result: {count} objects detected")
-
-        return CountResponse(count=count, objects=objects)
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse AI response as JSON: {e}")
-        logger.error(f"Raw response: {response_text[:500] if 'response_text' in dir() else 'N/A'}")
-        return CountResponse(count=0, objects=[])
     except Exception as e:
         logger.error(f"Error in count_objects: {e}", exc_info=True)
         return CountResponse(count=0, objects=[])

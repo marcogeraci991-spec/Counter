@@ -4,14 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Image,
   Dimensions,
   Pressable,
-  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../src/store/AppContext';
 import { Colors } from '../src/constants/colors';
 
@@ -33,6 +32,7 @@ export default function ResultsScreen() {
     reset,
   } = useAppContext();
 
+  const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<'view' | 'add' | 'remove'>('view');
 
   // Calculate image display dimensions
@@ -72,7 +72,7 @@ export default function ResultsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Top bar with count */}
       <View style={styles.topBar}>
         <TouchableOpacity
@@ -142,7 +142,7 @@ export default function ResultsScreen() {
       </View>
 
       {/* Bottom toolbar */}
-      <View style={styles.toolbar}>
+      <View style={[styles.toolbar, { paddingBottom: insets.bottom + 8 }]}>
         <TouchableOpacity
           testID="manual-add-marker-btn"
           style={[
@@ -192,7 +192,7 @@ export default function ResultsScreen() {
           <Text style={styles.newPhotoText}>Nuovo</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

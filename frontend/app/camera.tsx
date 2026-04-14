@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useAppContext } from '../src/store/AppContext';
 import { Colors } from '../src/constants/colors';
@@ -57,8 +57,10 @@ export default function CameraScreen() {
     handleImageResult(result);
   };
 
+  const insets = useSafeAreaInsets();
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <View style={styles.topBar}>
         <TouchableOpacity
           testID="camera-back-btn"
@@ -100,7 +102,7 @@ export default function CameraScreen() {
           <Text style={styles.actionLabel}>Dalla Galleria</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

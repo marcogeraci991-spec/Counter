@@ -6,11 +6,17 @@ import {
   ScrollView,
   TouchableOpacity,
   SafeAreaView,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppContext } from '../src/store/AppContext';
 import { Colors } from '../src/constants/colors';
+
+const PADDING = 16;
+const GAP = 10;
+const COLS = 3;
 
 interface CategoryItem {
   id: string;
@@ -60,6 +66,7 @@ const CATEGORY_GROUPS: CategoryGroup[] = [
 
 export default function IndexScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { setCategory } = useAppContext();
 
   const handleSelect = (item: CategoryItem, groupTitle: string) => {
@@ -68,14 +75,17 @@ export default function IndexScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <MaterialCommunityIcons name="counter" size={36} color={Colors.primary} />
+        <MaterialCommunityIcons name="counter" size={32} color={Colors.primary} />
         <Text style={styles.title}>CountApp</Text>
         <Text style={styles.subtitle}>Seleziona la categoria di oggetti da contare</Text>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 16 }]}
+      >
         {CATEGORY_GROUPS.map((group) => (
           <View key={group.title} style={styles.group}>
             <Text style={styles.groupTitle}>{group.title}</Text>
@@ -90,17 +100,17 @@ export default function IndexScreen() {
                 >
                   <MaterialCommunityIcons
                     name={item.icon as any}
-                    size={32}
+                    size={28}
                     color={Colors.primary}
                   />
-                  <Text style={styles.cardLabel}>{item.label}</Text>
+                  <Text style={styles.cardLabel} numberOfLines={1}>{item.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
         ))}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -111,60 +121,57 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
     alignItems: 'center',
   },
   title: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '900',
     color: Colors.textPrimary,
-    marginTop: 8,
+    marginTop: 6,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.textTertiary,
-    marginTop: 8,
+    marginTop: 6,
     textAlign: 'center',
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 32,
+    paddingHorizontal: PADDING,
   },
   group: {
-    marginTop: 24,
+    marginTop: 20,
   },
   groupTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: Colors.textSecondary,
-    marginBottom: 12,
-    paddingLeft: 4,
+    marginBottom: 10,
+    paddingLeft: 2,
   },
   itemsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: GAP,
   },
   categoryCard: {
     backgroundColor: Colors.surface,
     borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 100,
-    flex: 1,
-    maxWidth: '48%' as any,
+    height: 80,
+    width: '31%',
   },
   cardLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: Colors.textPrimary,
-    marginTop: 8,
+    marginTop: 6,
     textAlign: 'center',
   },
 });
