@@ -1,0 +1,149 @@
+import React, { createContext, useContext, useState, useCallback } from 'react';
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface DrawnArea {
+  points: Point[];
+  mode: 'include' | 'exclude';
+}
+
+export interface Marker {
+  id: number;
+  x: number;
+  y: number;
+}
+
+interface AppState {
+  category: string | null;
+  categoryLabel: string | null;
+  imageUri: string | null;
+  imageBase64: string | null;
+  imageWidth: number;
+  imageHeight: number;
+  areas: DrawnArea[];
+  markers: Marker[];
+  isLoading: boolean;
+}
+
+interface AppContextType extends AppState {
+  setCategory: (category: string, label: string) => void;
+  setImage: (uri: string, base64: string, width: number, height: number) => void;
+  addArea: (area: DrawnArea) => void;
+  clearAreas: () => void;
+  undoArea: () => void;
+  setMarkers: (markers: Marker[]) => void;
+  addMarker: (x: number, y: number) => void;
+  removeMarker: (id: number) => void;
+  setLoading: (loading: boolean) => void;
+  reset: () => void;
+}
+
+const defaultState: AppState = {
+  category: null,
+  categoryLabel: null,
+  imageUri: null,
+  imageBase64: null,
+  imageWidth: 0,
+  imageHeight: 0,
+  areas: [],
+  markers: [],
+  isLoading: false,
+};
+
+const AppContext = createContext<AppContextType>({
+  ...defaultState,
+  setCategory: () => {},
+  setImage: () => {},
+  addArea: () => {},
+  clearAreas: () => {},
+  undoArea: () => {},
+  setMarkers: () => {},
+  addMarker: () => {},
+  removeMarker: () => {},
+  setLoading: () => {},
+  reset: () => {},
+});
+
+export const useAppContext = () => useContext(AppContext);
+
+export function AppProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<AppState>(defaultState);
+
+  const setCategory = useCallback((category: string, label: string) => {
+    setState(prev => ({ ...prev, category, categoryLabel: label }));
+  }, []);
+
+  const setImage = useCallback((uri: string, base64: string, width: number, height: number) => {
+    setState(prev => ({
+      ...prev,
+      imageUri: uri,
+      imageBase64: base64,
+      imageWidth: width,
+      imageHeight: height,
+      areas: [],
+      markers: [],
+    }));
+  }, []);
+
+  const addArea = useCallback((area: DrawnArea) => {
+    setState(prev => ({ ...prev, areas: [...prev.areas, area] }));
+  }, []);
+
+  const clearAreas = useCallback(() => {
+    setState(prev => ({ ...prev, areas: [] }));
+  }, []);
+
+  const undoArea = useCallback(() => {
+    setState(prev => ({ ...prev, areas: prev.areas.slice(0, -1) }));
+  }, []);
+
+  const setMarkers = useCallback((markers: Marker[]) => {
+    setState(prev => ({ ...prev, markers }));
+  }, []);
+
+  const addMarker = useCallback((x: number, y: number) => {
+    setState(prev => {
+      const maxId = prev.markers.reduce((max, m) => Math.max(max, m.id), 0);
+      return { ...prev, markers: [...prev.markers, { id: maxId + 1, x, y }] };
+    });
+  }, []);
+
+  const removeMarker = useCallback((id: number) => {
+    setState(prev => {
+      const filtered = prev.markers.filter(m => m.id !== id);
+      const renumbered = filtered.map((m, i) => ({ ...m, id: i + 1 }));
+      return { ...prev, markers: renumbered };
+    });
+  }, []);
+
+  const setLoading = useCallback((isLoading: boolean) => {
+    setState(prev => ({ ...prev, isLoading }));
+  }, []);
+
+  const reset = useCallback(() => {
+    setState(defaultState);
+  }, []);
+
+  return (
+    <AppContext.Provider
+      value={{
+        ...state,
+        setCategory,
+        setImage,
+        addArea,
+        clearAreas,
+        undoArea,
+        setMarkers,
+        addMarker,
+        removeMarker,
+        setLoading,
+        reset,
+      }}
+    >
+      {children}
+    </AppContext.Provider>
+  );
+}

@@ -1,0 +1,18 @@
+export const Colors = {
+  background: '#0A0A0A',
+  surface: '#1C1C1E',
+  surfaceElevated: '#2C2C2E',
+  primary: '#007AFF',
+  primaryActive: '#005BB5',
+  secondary: '#3A3A3C',
+  success: '#34C759',
+  danger: '#FF3B30',
+  warning: '#FFCC00',
+  textPrimary: '#FFFFFF',
+  textSecondary: '#EBEBF5',
+  textTertiary: '#8E8E93',
+  markerBg: 'rgba(0, 122, 255, 0.7)',
+  markerText: '#FFFFFF',
+  overlayDim: 'rgba(0, 0, 0, 0.6)',
+  overlayLight: 'rgba(255, 255, 255, 0.55)',
+};
