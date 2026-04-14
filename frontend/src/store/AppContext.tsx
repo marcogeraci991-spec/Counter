@@ -26,6 +26,7 @@ interface AppState {
   areas: DrawnArea[];
   markers: Marker[];
   isLoading: boolean;
+  sensitivity: number;
 }
 
 interface AppContextType extends AppState {
@@ -38,6 +39,7 @@ interface AppContextType extends AppState {
   addMarker: (x: number, y: number) => void;
   removeMarker: (id: number) => void;
   setLoading: (loading: boolean) => void;
+  setSensitivity: (v: number) => void;
   reset: () => void;
 }
 
@@ -51,6 +53,7 @@ const defaultState: AppState = {
   areas: [],
   markers: [],
   isLoading: false,
+  sensitivity: 0.5,
 };
 
 const AppContext = createContext<AppContextType>({
@@ -64,6 +67,7 @@ const AppContext = createContext<AppContextType>({
   addMarker: () => {},
   removeMarker: () => {},
   setLoading: () => {},
+  setSensitivity: () => {},
   reset: () => {},
 });
 
@@ -123,6 +127,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({ ...prev, isLoading }));
   }, []);
 
+  const setSensitivity = useCallback((sensitivity: number) => {
+    setState(prev => ({ ...prev, sensitivity }));
+  }, []);
+
   const reset = useCallback(() => {
     setState(defaultState);
   }, []);
@@ -140,6 +148,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addMarker,
         removeMarker,
         setLoading,
+        setSensitivity,
         reset,
       }}
     >

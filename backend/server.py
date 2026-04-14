@@ -52,6 +52,7 @@ class CountRequest(BaseModel):
     category: str
     include_areas: List[AreaModel]
     exclude_areas: List[AreaModel] = []
+    sensitivity: float = 0.5
 
 class DetectedObject(BaseModel):
     id: int
@@ -70,30 +71,35 @@ CIRCULAR_CATEGORIES = {
 }
 
 
-def detect_circles_hough(gray, mask_np):
+def detect_circles_hough(gray, mask_np, sensitivity=0.5):
     """Detect circular objects with properly tuned Hough parameters."""
     h, w = gray.shape[:2]
 
-    # Estimate object size from mask area
     mask_area = int(np.sum(mask_np > 0))
     if mask_area < 100:
         return []
 
-    # Estimate radius: assume ~30-50 objects in the selected area
     est_r = int(np.sqrt(mask_area / 40 / np.pi))
     min_r = max(8, est_r // 3)
     max_r = max(30, est_r * 2)
     min_dist = max(15, int(est_r * 0.8))
 
-    logger.info(f"Hough params: est_r={est_r}, minR={min_r}, maxR={max_r}, minDist={min_dist}")
+    # Sensitivity maps to param2: high sensitivity = low param2 = more detections
+    # sensitivity 0.1 -> param2 ~75 (very selective)
+    # sensitivity 0.5 -> param2 ~55 (balanced)
+    # sensitivity 1.0 -> param2 ~30 (detect more)
+    base_param2 = int(75 - sensitivity * 45)
+    param2_values = [base_param2, base_param2 + 10, base_param2 - 10]
+    param2_values = [max(20, min(80, p)) for p in param2_values]
+
+    logger.info(f"Hough params: est_r={est_r}, minR={min_r}, maxR={max_r}, minDist={min_dist}, sensitivity={sensitivity:.2f}, param2_base={base_param2}")
 
     clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
     blurred = cv2.GaussianBlur(enhanced, (9, 9), 2)
 
     best_objects = []
-    # Use higher param2 values for more selective detection
-    for param2 in [50, 60, 70]:
+    for param2 in param2_values:
         circles = cv2.HoughCircles(
             blurred, cv2.HOUGH_GRADIENT,
             dp=1.2, minDist=min_dist,
@@ -107,7 +113,6 @@ def detect_circles_hough(gray, mask_np):
                 if 0 <= cx < w and 0 <= cy < h and mask_np[cy, cx] > 0:
                     valid.append({"x": float(x / w * 100), "y": float(y / h * 100)})
             logger.info(f"  param2={param2}: {len(valid)} valid circles")
-            # Keep the result closest to a reasonable count
             if len(valid) > len(best_objects):
                 best_objects = valid
 
@@ -193,8 +198,9 @@ async def count_objects(request: CountRequest):
         gray = cv2.cvtColor(masked_bgr, cv2.COLOR_BGR2GRAY)
 
         # Detect based on category
+        sens = max(0.1, min(1.0, request.sensitivity))
         if request.category in CIRCULAR_CATEGORIES:
-            objects = detect_circles_hough(gray, mask_np)
+            objects = detect_circles_hough(gray, mask_np, sens)
         else:
             objects = detect_contours(gray, mask_np)
 
