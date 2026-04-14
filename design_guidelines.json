@@ -1,0 +1,104 @@
+{
+  "theme": "dark",
+  "archetype": "2 (Performance Pro)",
+  "domain": "Industrial Tool / Productivity App",
+  "colors": {
+    "background": "#0A0A0A",
+    "surface": "#1C1C1E",
+    "surface_elevated": "#2C2C2E",
+    "primary": "#007AFF",
+    "primary_active": "#005BB5",
+    "secondary": "#3A3A3C",
+    "success": "#34C759",
+    "danger": "#FF3B30",
+    "warning": "#FFCC00",
+    "text_primary": "#FFFFFF",
+    "text_secondary": "#EBEBF5",
+    "text_tertiary": "#8E8E93",
+    "marker_bg": "rgba(0, 122, 255, 0.7)",
+    "marker_text": "#FFFFFF",
+    "overlay_dim": "rgba(0, 0, 0, 0.6)"
+  },
+  "typography": {
+    "heading_font": "Barlow Condensed, system-ui, sans-serif",
+    "body_font": "DM Sans, system-ui, sans-serif",
+    "sizes": {
+      "h1": 32,
+      "h2": 24,
+      "h3": 20,
+      "body": 16,
+      "small": 14,
+      "tiny": 12
+    },
+    "weights": {
+      "regular": "400",
+      "medium": "500",
+      "bold": "700",
+      "black": "900"
+    }
+  },
+  "layout": {
+    "spacing": {
+      "xs": 4,
+      "sm": 8,
+      "md": 16,
+      "lg": 24,
+      "xl": 32,
+      "xxl": 48
+    },
+    "border_radius": {
+      "sm": 4,
+      "md": 8,
+      "lg": 12,
+      "xl": 16,
+      "pill": 9999
+    }
+  },
+  "components": {
+    "category_selector": {
+      "description": "Horizontal scrollable list of pill-shaped buttons for selecting object types (bars, tubes, etc.).",
+      "style": "Background secondary, text primary. When active, background primary, text white. Crisp edges, radius pill."
+    },
+    "camera_view": {
+      "description": "Full-screen camera viewport using expo-camera.",
+      "style": "Overlaid controls should have dark semi-transparent backgrounds (surface color with opacity) and backdrop blur if possible."
+    },
+    "drawing_canvas": {
+      "description": "Interactive layer over the captured photo for drawing include/exclude regions.",
+      "style": "Default exclude (dark tint over image). Include paths drawn with green stroke (#34C759), Exclude paths with red stroke (#FF3B30). Supports 1-finger draw, 2-finger pan/zoom."
+    },
+    "markers": {
+      "description": "Numbered indicators placed over detected objects in the photo.",
+      "style": "Small circular absolute-positioned views. Background marker_bg, border 1px solid white. Text tiny, bold, centered."
+    },
+    "bottom_sheet": {
+      "description": "Draggable or fixed bottom panel for counting results and manual adjustments.",
+      "style": "Surface color, top border radius xl. Contains large counter typography and distinct +/- circular buttons."
+    },
+    "buttons": {
+      "primary": "Large, full-width or prominent FAB. Background primary, radius md, text bold white.",
+      "icon_button": "Circular, background surface_elevated, icon white. Used for manual add/remove markers."
+    }
+  },
+  "animations": {
+    "button_press": "Scale down to 0.95 on press in.",
+    "camera_capture": "Brief full-screen white flash opacity 0 to 1 to 0.",
+    "counter_update": "Subtle pop (scale 1.1 to 1) when count increases/decreases."
+  },
+  "accessibility": {
+    "contrast": "Ensure white text on primary/surface backgrounds meets 4.5:1 minimum contrast.",
+    "touch_targets": "Minimum 44x44 points for all interactive elements (+/- buttons, category pills)."
+  },
+  "testing": {
+    "attributes": "All interactive elements MUST include data-testid. Examples: 'category-select-bars', 'capture-photo-btn', 'manual-add-marker-btn', 'count-result-text'."
+  },
+  "image_urls": [],
+  "instructions_to_main_agent": [
+    "This is a React Native Expo application. Use React Native Core Components (View, Text, TouchableOpacity, ScrollView, StyleSheet) and Expo libraries (expo-camera, expo-image-manipulator, etc.).",
+    "Since Tailwind was mentioned in the environment but this is Expo, use NativeWind if configured, otherwise use standard React Native StyleSheet strictly following the defined colors, spacing, and typography tokens.",
+    "For the drawing interaction (include/exclude), implement a custom canvas using React Native Gesture Handler or PanResponder to track touch events and render SVG paths (react-native-svg) over the image.",
+    "Ensure the camera takes up the full screen, with UI controls overlaid safely within the SafeAreaView to avoid notches.",
+    "Implement the manual marker add/remove feature by allowing users to tap on the image to add a marker, or tap an existing marker to remove it, supplemented by the +/- buttons in the bottom sheet.",
+    "Keep the UI 'Performance Pro' style: highly functional, dark mode by default, high contrast, zero clutter. Every element should feel tactile and responsive."
+  ]
+}
