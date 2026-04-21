@@ -42,6 +42,8 @@ export default function AreaSelectScreen() {
   const panXRef = useRef(0);
   const panYRef = useRef(0);
   const pinchRef = useRef<{ d: number; mx: number; my: number; z: number; px: number; py: number } | null>(null);
+  const containerPageRef = useRef({ x: 0, y: 0 });
+  const canvasRef = useRef<View>(null);
 
   const setDrawModeSync = (m: 'include' | 'exclude') => { setDrawMode(m); drawModeRef.current = m; };
 
@@ -57,13 +59,16 @@ export default function AreaSelectScreen() {
   const dWRef = useRef(dW); dWRef.current = dW;
   const dHRef = useRef(dH); dHRef.current = dH;
 
-  // Convert screen touch coords to image coords (accounting for transform origin at center)
-  const screenToImage = (sx: number, sy: number) => {
+  // Convert screen pageX/pageY to image coords via container absolute position
+  const pageToImage = (pageX: number, pageY: number) => {
+    const relX = pageX - containerPageRef.current.x;
+    const relY = pageY - containerPageRef.current.y;
     const cx = dWRef.current / 2;
     const cy = dHRef.current / 2;
-    const ix = (sx - cx - panXRef.current) / zoomRef.current + cx;
-    const iy = (sy - cy - panYRef.current) / zoomRef.current + cy;
-    return { x: ix, y: iy };
+    return {
+      x: (relX - cx - panXRef.current) / zoomRef.current + cx,
+      y: (relY - cy - panYRef.current) / zoomRef.current + cy,
+    };
   };
 
   const panResponder = useRef(
@@ -73,14 +78,10 @@ export default function AreaSelectScreen() {
       onPanResponderGrant: (evt) => {
         const t = evt.nativeEvent.touches;
         if (t && t.length >= 2) { pinchRef.current = null; return; }
-        const lx = evt.nativeEvent.locationX;
-        const ly = evt.nativeEvent.locationY;
-        if (lx != null && ly != null) {
-          const p = screenToImage(lx, ly);
-          isDrawingRef.current = true;
-          curPtsRef.current = [p];
-          setCurrentPoints([p]);
-        }
+        const p = pageToImage(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        isDrawingRef.current = true;
+        curPtsRef.current = [p];
+        setCurrentPoints([p]);
       },
       onPanResponderMove: (evt) => {
         const t = evt.nativeEvent.touches;
@@ -104,17 +105,13 @@ export default function AreaSelectScreen() {
           return;
         }
         if (!isDrawingRef.current) return;
-        const lx = evt.nativeEvent.locationX;
-        const ly = evt.nativeEvent.locationY;
-        if (lx != null && ly != null) {
-          const p = screenToImage(lx, ly);
-          const pts = curPtsRef.current;
-          const last = pts[pts.length - 1];
-          if (last && Math.abs(p.x - last.x) < 2 && Math.abs(p.y - last.y) < 2) return;
-          const np = [...pts, p];
-          curPtsRef.current = np;
-          setCurrentPoints(np);
-        }
+        const p = pageToImage(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        const pts = curPtsRef.current;
+        const last = pts[pts.length - 1];
+        if (last && Math.abs(p.x - last.x) < 2 && Math.abs(p.y - last.y) < 2) return;
+        const np = [...pts, p];
+        curPtsRef.current = np;
+        setCurrentPoints(np);
       },
       onPanResponderRelease: () => {
         pinchRef.current = null;
@@ -165,7 +162,16 @@ export default function AreaSelectScreen() {
       </View>
 
       <View style={st.cw}>
-        <View style={[st.canvas, { width: dW, height: dH, overflow: 'hidden' }]} {...panResponder.panHandlers}>
+        <View
+          ref={canvasRef}
+          style={[st.canvas, { width: dW, height: dH, overflow: 'hidden' }]}
+          {...panResponder.panHandlers}
+          onLayout={() => {
+            canvasRef.current?.measureInWindow?.((x: number, y: number) => {
+              containerPageRef.current = { x: x || 0, y: y || 0 };
+            });
+          }}
+        >
           <View style={{ width: dW, height: dH, transform: [{ translateX: panX }, { translateY: panY }, { scale: zoom }] }}>
             <Image source={{ uri: imageUri }} style={{ width: dW, height: dH }} resizeMode="cover" />
             <Svg style={StyleSheet.absoluteFill} width={dW} height={dH} pointerEvents="none">

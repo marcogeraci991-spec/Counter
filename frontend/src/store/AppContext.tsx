@@ -15,6 +15,7 @@ export interface Marker {
   x: number;
   y: number;
   radius: number;
+  sizeOverride?: number;
 }
 
 interface AppState {
@@ -39,6 +40,7 @@ interface AppContextType extends AppState {
   setMarkers: (markers: Marker[]) => void;
   addMarker: (x: number, y: number) => void;
   removeMarker: (id: number) => void;
+  updateMarkerSize: (id: number, size: number) => void;
   setLoading: (loading: boolean) => void;
   setSensitivity: (v: number) => void;
   reset: () => void;
@@ -67,6 +69,7 @@ const AppContext = createContext<AppContextType>({
   setMarkers: () => {},
   addMarker: () => {},
   removeMarker: () => {},
+  updateMarkerSize: () => {},
   setLoading: () => {},
   setSensitivity: () => {},
   reset: () => {},
@@ -113,7 +116,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState(prev => {
       const maxId = prev.markers.reduce((max, m) => Math.max(max, m.id), 0);
       const avgR = prev.markers.length > 0 ? prev.markers.reduce((s, m) => s + m.radius, 0) / prev.markers.length : 2;
-      return { ...prev, markers: [...prev.markers, { id: maxId + 1, x, y, radius: avgR }] };
+      return { ...prev, markers: [...prev.markers, { id: maxId + 1, x, y, radius: avgR, sizeOverride: undefined }] };
     });
   }, []);
 
@@ -123,6 +126,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const renumbered = filtered.map((m, i) => ({ ...m, id: i + 1 }));
       return { ...prev, markers: renumbered };
     });
+  }, []);
+
+  const updateMarkerSize = useCallback((id: number, size: number) => {
+    setState(prev => ({
+      ...prev,
+      markers: prev.markers.map(m => m.id === id ? { ...m, sizeOverride: size } : m),
+    }));
   }, []);
 
   const setLoading = useCallback((isLoading: boolean) => {
@@ -149,6 +159,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setMarkers,
         addMarker,
         removeMarker,
+        updateMarkerSize,
         setLoading,
         setSensitivity,
         reset,
