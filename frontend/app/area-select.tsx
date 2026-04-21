@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image, Alert,
-  ActivityIndicator, PanResponder, Dimensions,
+  ActivityIndicator, PanResponder, Dimensions, LayoutChangeEvent,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -34,16 +34,17 @@ export default function AreaSelectScreen() {
   const curPtsRef = useRef<Point[]>([]);
   const isDrawingRef = useRef(false);
 
-  // Zoom/Pan
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
   const zoomRef = useRef(1);
   const panXRef = useRef(0);
   const panYRef = useRef(0);
-  const pinchRef = useRef<{ d: number; mx: number; my: number; z: number; px: number; py: number } | null>(null);
-  const containerPageRef = useRef({ x: 0, y: 0 });
-  const canvasRef = useRef<View>(null);
+  const pinchRef = useRef<any>(null);
+
+  // Absolute position of canvas on screen
+  const canvasPageX = useRef(0);
+  const canvasPageY = useRef(0);
 
   const setDrawModeSync = (m: 'include' | 'exclude') => { setDrawMode(m); drawModeRef.current = m; };
 
@@ -54,22 +55,28 @@ export default function AreaSelectScreen() {
   let dW = SCREEN_W;
   let dH = SCREEN_W / aspect;
   if (dH > availH) { dH = availH; dW = availH * aspect; }
-
-  // Keep refs for dimensions (used in PanResponder closure)
   const dWRef = useRef(dW); dWRef.current = dW;
   const dHRef = useRef(dH); dHRef.current = dH;
 
-  // Convert screen pageX/pageY to image coords via container absolute position
-  const pageToImage = (pageX: number, pageY: number) => {
-    const relX = pageX - containerPageRef.current.x;
-    const relY = pageY - containerPageRef.current.y;
+  // Use pageX/pageY minus canvas absolute position for accurate coords
+  const touchToImage = (pageX: number, pageY: number) => {
+    const rx = pageX - canvasPageX.current;
+    const ry = pageY - canvasPageY.current;
     const cx = dWRef.current / 2;
     const cy = dHRef.current / 2;
     return {
-      x: (relX - cx - panXRef.current) / zoomRef.current + cx,
-      y: (relY - cy - panYRef.current) / zoomRef.current + cy,
+      x: (rx - cx - panXRef.current) / zoomRef.current + cx,
+      y: (ry - cy - panYRef.current) / zoomRef.current + cy,
     };
   };
+
+  const canvasRef = useRef<View>(null);
+  const measureCanvas = useCallback(() => {
+    canvasRef.current?.measureInWindow?.((x: number, y: number) => {
+      canvasPageX.current = x || 0;
+      canvasPageY.current = y || 0;
+    });
+  }, []);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -78,7 +85,7 @@ export default function AreaSelectScreen() {
       onPanResponderGrant: (evt) => {
         const t = evt.nativeEvent.touches;
         if (t && t.length >= 2) { pinchRef.current = null; return; }
-        const p = pageToImage(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        const p = touchToImage(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
         isDrawingRef.current = true;
         curPtsRef.current = [p];
         setCurrentPoints([p]);
@@ -105,7 +112,7 @@ export default function AreaSelectScreen() {
           return;
         }
         if (!isDrawingRef.current) return;
-        const p = pageToImage(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        const p = touchToImage(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
         const pts = curPtsRef.current;
         const last = pts[pts.length - 1];
         if (last && Math.abs(p.x - last.x) < 2 && Math.abs(p.y - last.y) < 2) return;
@@ -145,11 +152,15 @@ export default function AreaSelectScreen() {
     finally { setLoading(false); }
   };
 
-  const sliderPan = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true, onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: (e) => { setSensitivity(Math.max(0.1, Math.min(1, e.nativeEvent.locationX / (SCREEN_W - 100)))); },
-    onPanResponderMove: (e) => { setSensitivity(Math.max(0.1, Math.min(1, e.nativeEvent.locationX / (SCREEN_W - 100)))); },
+  // Sensitivity slider - use state-based tracking instead of PanResponder
+  const [sliderWidth, setSliderWidth] = useState(200);
+  const sensSliderPan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (e) => { const w = sliderWidthRef.current; setSensitivity(Math.max(0.1, Math.min(1, e.nativeEvent.locationX / w))); },
+    onPanResponderMove: (e) => { const w = sliderWidthRef.current; setSensitivity(Math.max(0.1, Math.min(1, e.nativeEvent.locationX / w))); },
   })).current;
+  const sliderWidthRef = useRef(200);
 
   if (!imageUri) return <View style={[st.ctn, { paddingTop: insets.top }]}><Text style={st.err}>Nessuna immagine</Text></View>;
 
@@ -162,35 +173,21 @@ export default function AreaSelectScreen() {
       </View>
 
       <View style={st.cw}>
-        <View
-          ref={canvasRef}
-          style={[st.canvas, { width: dW, height: dH, overflow: 'hidden' }]}
-          {...panResponder.panHandlers}
-          onLayout={() => {
-            canvasRef.current?.measureInWindow?.((x: number, y: number) => {
-              containerPageRef.current = { x: x || 0, y: y || 0 };
-            });
-          }}
-        >
+        <View ref={canvasRef} style={[st.canvas, { width: dW, height: dH, overflow: 'hidden' }]} {...panResponder.panHandlers} onLayout={measureCanvas}>
           <View style={{ width: dW, height: dH, transform: [{ translateX: panX }, { translateY: panY }, { scale: zoom }] }}>
             <Image source={{ uri: imageUri }} style={{ width: dW, height: dH }} resizeMode="cover" />
             <Svg style={StyleSheet.absoluteFill} width={dW} height={dH} pointerEvents="none">
               <Defs>
                 <Mask id="dm">
                   <Rect x="0" y="0" width={dW} height={dH} fill="white" />
-                  {/* Render ALL areas in drawing order */}
-                  {areas.map((a, i) => (
-                    <Path key={`a${i}`} d={pointsToPathD(a.points)} fill={a.mode === 'include' ? 'black' : 'white'} />
-                  ))}
+                  {areas.map((a, i) => <Path key={`a${i}`} d={pointsToPathD(a.points)} fill={a.mode === 'include' ? 'black' : 'white'} />)}
                 </Mask>
               </Defs>
               <Rect x="0" y="0" width={dW} height={dH} fill="rgba(255,255,255,0.55)" mask="url(#dm)" />
               {currentPoints.length > 1 && (
-                <Path
-                  d={currentPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
+                <Path d={currentPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}
                   stroke={drawModeRef.current === 'include' ? Colors.success : Colors.danger}
-                  strokeWidth={2 / zoom} fill="none" strokeDasharray="6,4"
-                />
+                  strokeWidth={2 / zoom} fill="none" strokeDasharray="6,4" />
               )}
             </Svg>
           </View>
@@ -214,7 +211,13 @@ export default function AreaSelectScreen() {
         </View>
         <View style={st.sr}>
           <Text style={st.sl}>Sensibilità</Text>
-          <View style={st.stc} {...sliderPan.panHandlers}><View style={st.strack} /><View style={[st.sfill, { width: `${sensitivity * 100}%` }]} /><View style={[st.sthumb, { left: `${sensitivity * 100}%` }]} /></View>
+          <View style={st.stc}
+            onLayout={(e: LayoutChangeEvent) => { sliderWidthRef.current = e.nativeEvent.layout.width; setSliderWidth(e.nativeEvent.layout.width); }}
+            {...sensSliderPan.panHandlers}>
+            <View style={st.strack} />
+            <View style={[st.sfill, { width: `${sensitivity * 100}%` }]} />
+            <View style={[st.sthumb, { left: sensitivity * sliderWidth - 11 }]} />
+          </View>
           <Text style={st.sv}>{Math.round(sensitivity * 100)}%</Text>
         </View>
       </View>
@@ -241,6 +244,6 @@ const st = StyleSheet.create({
   stc: { flex: 1, height: 36, justifyContent: 'center' },
   strack: { height: 4, backgroundColor: Colors.surfaceElevated, borderRadius: 2 },
   sfill: { position: 'absolute', height: 4, backgroundColor: Colors.primary, borderRadius: 2 },
-  sthumb: { position: 'absolute', width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.primary, marginLeft: -11, top: 7 },
+  sthumb: { position: 'absolute', width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.primary, top: 7 },
   sv: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary, width: 35, textAlign: 'right' },
 });

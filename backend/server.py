@@ -73,45 +73,47 @@ CIRCULAR_CATEGORIES = {
 
 
 def detect_circles_hough(gray, mask_np, sensitivity=0.5):
-    """Fast circle detection - single Hough call with sensitivity-tuned param2."""
+    """Detect circular objects - restored proven algorithm with minor speed optimization."""
     h, w = gray.shape[:2]
     mask_area = int(np.sum(mask_np > 0))
     if mask_area < 100:
         return []
 
     est_r = int(np.sqrt(mask_area / 40 / np.pi))
-    min_r = max(5, est_r // 4)
-    max_r = max(25, est_r * 3)
-    min_dist = max(10, int(est_r * 0.7))
+    min_r = max(8, est_r // 3)
+    max_r = max(30, est_r * 2)
+    min_dist = max(15, int(est_r * 0.8))
 
-    # Wide sensitivity range: 0.0 → param2=90 (very few), 1.0 → param2=15 (many)
-    param2 = int(90 - sensitivity * 75)
-    param2 = max(15, min(90, param2))
+    # Sensitivity: 0.1 -> param2=75 (selective), 0.5 -> param2=52, 1.0 -> param2=30
+    base_param2 = int(75 - sensitivity * 45)
+    param2_values = [base_param2, base_param2 + 10]
+    param2_values = [max(25, min(80, p)) for p in param2_values]
 
-    logger.info(f"Hough: est_r={est_r}, minR={min_r}, maxR={max_r}, minDist={min_dist}, param2={param2}")
+    logger.info(f"Hough: est_r={est_r}, minR={min_r}, maxR={max_r}, minDist={min_dist}, sens={sensitivity:.2f}, p2={param2_values}")
 
     clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
-    blurred = cv2.GaussianBlur(enhanced, (7, 7), 1.5)
+    blurred = cv2.GaussianBlur(enhanced, (9, 9), 2)
 
-    circles = cv2.HoughCircles(
-        blurred, cv2.HOUGH_GRADIENT,
-        dp=1.5, minDist=min_dist,
-        param1=80, param2=param2,
-        minRadius=min_r, maxRadius=max_r
-    )
+    best_objects = []
+    for param2 in param2_values:
+        circles = cv2.HoughCircles(
+            blurred, cv2.HOUGH_GRADIENT,
+            dp=1.2, minDist=min_dist,
+            param1=100, param2=param2,
+            minRadius=min_r, maxRadius=max_r
+        )
+        if circles is not None:
+            valid = []
+            for (x, y, r) in circles[0]:
+                cx, cy = int(x), int(y)
+                if 0 <= cx < w and 0 <= cy < h and mask_np[cy, cx] > 0:
+                    valid.append({"x": float(x / w * 100), "y": float(y / h * 100), "radius": float(r / w * 100)})
+            logger.info(f"  param2={param2}: {len(valid)} circles")
+            if len(valid) > len(best_objects):
+                best_objects = valid
 
-    if circles is None:
-        return []
-
-    objects = []
-    for (x, y, r) in circles[0]:
-        cx, cy = int(x), int(y)
-        if 0 <= cx < w and 0 <= cy < h and mask_np[cy, cx] > 0:
-            objects.append({"x": float(x / w * 100), "y": float(y / h * 100), "radius": float(r / w * 100)})
-
-    logger.info(f"Detected {len(objects)} circles")
-    return objects
+    return best_objects
 
 
 def detect_contours(gray, mask_np):
