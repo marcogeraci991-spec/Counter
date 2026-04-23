@@ -53,6 +53,14 @@ class CountRequest(BaseModel):
     include_areas: List[AreaModel]
     exclude_areas: List[AreaModel] = []
     sensitivity: float = 0.5
+    # Advanced params (overrides from Settings screen)
+    dp: float = 1.2
+    blur_size: int = 9
+    param1: int = 100
+    param2_override: int = 0  # 0 = use sensitivity-based auto
+    min_dist_factor: float = 0.8
+    clahe_clip: float = 2.5
+    obj_count_estimate: int = 40
 
 class DetectedObject(BaseModel):
     id: int
@@ -72,35 +80,38 @@ CIRCULAR_CATEGORIES = {
 }
 
 
-def detect_circles_hough(gray, mask_np, sensitivity=0.5):
-    """Detect circular objects - restored proven algorithm with minor speed optimization."""
+def detect_circles_hough(gray, mask_np, sensitivity=0.5, dp=1.2, blur_size=9, param1=100, param2_override=0, min_dist_factor=0.8, clahe_clip=2.5, obj_count_estimate=40):
+    """Detect circular objects with tunable parameters."""
     h, w = gray.shape[:2]
     mask_area = int(np.sum(mask_np > 0))
     if mask_area < 100:
         return []
 
-    est_r = int(np.sqrt(mask_area / 40 / np.pi))
-    min_r = max(8, est_r // 3)
-    max_r = max(30, est_r * 2)
-    min_dist = max(15, int(est_r * 0.8))
+    est_r = int(np.sqrt(mask_area / max(1, obj_count_estimate) / np.pi))
+    min_r = max(5, est_r // 3)
+    max_r = max(20, est_r * 2)
+    min_dist = max(10, int(est_r * min_dist_factor))
 
-    # Sensitivity: 0.1 -> param2=75 (selective), 0.5 -> param2=52, 1.0 -> param2=30
-    base_param2 = int(75 - sensitivity * 45)
-    param2_values = [base_param2, base_param2 + 10]
-    param2_values = [max(25, min(80, p)) for p in param2_values]
+    if param2_override > 0:
+        param2_values = [param2_override]
+    else:
+        base_p2 = int(75 - sensitivity * 45)
+        param2_values = [base_p2, base_p2 + 10, base_p2 - 10]
+        param2_values = [max(15, min(80, p)) for p in param2_values]
 
-    logger.info(f"Hough: est_r={est_r}, minR={min_r}, maxR={max_r}, minDist={min_dist}, sens={sensitivity:.2f}, p2={param2_values}")
+    logger.info(f"Hough: est_r={est_r}, minR={min_r}, maxR={max_r}, minDist={min_dist}, dp={dp}, p2={param2_values}")
 
-    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    blur_k = max(3, blur_size if blur_size % 2 == 1 else blur_size + 1)
+    clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
-    blurred = cv2.GaussianBlur(enhanced, (9, 9), 2)
+    blurred = cv2.GaussianBlur(enhanced, (blur_k, blur_k), 2)
 
     best_objects = []
-    for param2 in param2_values:
+    for p2 in param2_values:
         circles = cv2.HoughCircles(
             blurred, cv2.HOUGH_GRADIENT,
-            dp=1.2, minDist=min_dist,
-            param1=100, param2=param2,
+            dp=dp, minDist=min_dist,
+            param1=param1, param2=p2,
             minRadius=min_r, maxRadius=max_r
         )
         if circles is not None:
@@ -109,7 +120,7 @@ def detect_circles_hough(gray, mask_np, sensitivity=0.5):
                 cx, cy = int(x), int(y)
                 if 0 <= cx < w and 0 <= cy < h and mask_np[cy, cx] > 0:
                     valid.append({"x": float(x / w * 100), "y": float(y / h * 100), "radius": float(r / w * 100)})
-            logger.info(f"  param2={param2}: {len(valid)} circles")
+            logger.info(f"  param2={p2}: {len(valid)} circles")
             if len(valid) > len(best_objects):
                 best_objects = valid
 
@@ -194,10 +205,14 @@ async def count_objects(request: CountRequest):
         masked_bgr = cv2.bitwise_and(image_bgr, image_bgr, mask=mask_np)
         gray = cv2.cvtColor(masked_bgr, cv2.COLOR_BGR2GRAY)
 
-        # Detect based on category
         sens = max(0.1, min(1.0, request.sensitivity))
+        adv = {
+            'dp': request.dp, 'blur_size': request.blur_size, 'param1': request.param1,
+            'param2_override': request.param2_override, 'min_dist_factor': request.min_dist_factor,
+            'clahe_clip': request.clahe_clip, 'obj_count_estimate': request.obj_count_estimate,
+        }
         if request.category in CIRCULAR_CATEGORIES:
-            objects = detect_circles_hough(gray, mask_np, sens)
+            objects = detect_circles_hough(gray, mask_np, sens, **adv)
         else:
             objects = detect_contours(gray, mask_np)
 

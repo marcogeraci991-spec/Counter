@@ -29,6 +29,10 @@ interface AppState {
   markers: Marker[];
   isLoading: boolean;
   sensitivity: number;
+  advancedParams: {
+    dp: number; blur_size: number; param1: number; param2_override: number;
+    min_dist_factor: number; clahe_clip: number; obj_count_estimate: number;
+  };
 }
 
 interface AppContextType extends AppState {
@@ -57,6 +61,7 @@ const defaultState: AppState = {
   markers: [],
   isLoading: false,
   sensitivity: 0.5,
+  advancedParams: { dp: 1.2, blur_size: 9, param1: 100, param2_override: 0, min_dist_factor: 0.8, clahe_clip: 2.5, obj_count_estimate: 40 },
 };
 
 const AppContext = createContext<AppContextType>({
@@ -72,6 +77,7 @@ const AppContext = createContext<AppContextType>({
   updateMarkerSize: () => {},
   setLoading: () => {},
   setSensitivity: () => {},
+  setAdvancedParams: () => {},
   reset: () => {},
 });
 
@@ -143,6 +149,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({ ...prev, sensitivity }));
   }, []);
 
+  const setAdvancedParams = useCallback((advancedParams: AppState['advancedParams']) => {
+    setState(prev => ({ ...prev, advancedParams }));
+  }, []);
+
   const reset = useCallback(() => {
     setState(defaultState);
   }, []);
@@ -162,6 +172,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         updateMarkerSize,
         setLoading,
         setSensitivity,
+        setAdvancedParams,
         reset,
       }}
     >

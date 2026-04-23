@@ -42,9 +42,7 @@ export default function AreaSelectScreen() {
   const panYRef = useRef(0);
   const pinchRef = useRef<any>(null);
 
-  // Absolute position of canvas on screen
-  const canvasPageX = useRef(0);
-  const canvasPageY = useRef(0);
+  // Absolute position of canvas on screen - NOT USED, keep locationX/locationY which works on Android
 
   const setDrawModeSync = (m: 'include' | 'exclude') => { setDrawMode(m); drawModeRef.current = m; };
 
@@ -58,25 +56,20 @@ export default function AreaSelectScreen() {
   const dWRef = useRef(dW); dWRef.current = dW;
   const dHRef = useRef(dH); dHRef.current = dH;
 
-  // Use pageX/pageY minus canvas absolute position for accurate coords
-  const touchToImage = (pageX: number, pageY: number) => {
-    const rx = pageX - canvasPageX.current;
-    const ry = pageY - canvasPageY.current;
+  // Convert touch locationX/locationY (relative to canvas view) to image coords
+  const touchToImage = (locX: number, locY: number) => {
+    if (zoomRef.current === 1 && panXRef.current === 0 && panYRef.current === 0) {
+      return { x: locX, y: locY }; // No transform = direct coordinates
+    }
     const cx = dWRef.current / 2;
     const cy = dHRef.current / 2;
     return {
-      x: (rx - cx - panXRef.current) / zoomRef.current + cx,
-      y: (ry - cy - panYRef.current) / zoomRef.current + cy,
+      x: (locX - cx - panXRef.current) / zoomRef.current + cx,
+      y: (locY - cy - panYRef.current) / zoomRef.current + cy,
     };
   };
 
   const canvasRef = useRef<View>(null);
-  const measureCanvas = useCallback(() => {
-    canvasRef.current?.measureInWindow?.((x: number, y: number) => {
-      canvasPageX.current = x || 0;
-      canvasPageY.current = y || 0;
-    });
-  }, []);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -85,7 +78,7 @@ export default function AreaSelectScreen() {
       onPanResponderGrant: (evt) => {
         const t = evt.nativeEvent.touches;
         if (t && t.length >= 2) { pinchRef.current = null; return; }
-        const p = touchToImage(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        const p = touchToImage(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
         isDrawingRef.current = true;
         curPtsRef.current = [p];
         setCurrentPoints([p]);
@@ -112,7 +105,7 @@ export default function AreaSelectScreen() {
           return;
         }
         if (!isDrawingRef.current) return;
-        const p = touchToImage(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+        const p = touchToImage(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
         const pts = curPtsRef.current;
         const last = pts[pts.length - 1];
         if (last && Math.abs(p.x - last.x) < 2 && Math.abs(p.y - last.y) < 2) return;
@@ -173,7 +166,7 @@ export default function AreaSelectScreen() {
       </View>
 
       <View style={st.cw}>
-        <View ref={canvasRef} style={[st.canvas, { width: dW, height: dH, overflow: 'hidden' }]} {...panResponder.panHandlers} onLayout={measureCanvas}>
+        <View ref={canvasRef} style={[st.canvas, { width: dW, height: dH, overflow: 'hidden' }]} {...panResponder.panHandlers}>
           <View style={{ width: dW, height: dH, transform: [{ translateX: panX }, { translateY: panY }, { scale: zoom }] }}>
             <Image source={{ uri: imageUri }} style={{ width: dW, height: dH }} resizeMode="cover" />
             <Svg style={StyleSheet.absoluteFill} width={dW} height={dH} pointerEvents="none">

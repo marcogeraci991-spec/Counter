@@ -48,24 +48,21 @@ export default function ResultsScreen() {
     return Math.max(6, Math.min(diameter * 0.6, 28));
   }, [dW]);
 
-  const touchToImage = (pageX: number, pageY: number) => {
-    const rx = pageX - containerPageX.current;
-    const ry = pageY - containerPageY.current;
+  // Use locationX for touch coords (reliable on Android)
+  const touchToImage = (locX: number, locY: number) => {
+    if (zoomRef.current === 1 && panXRef.current === 0 && panYRef.current === 0) {
+      return { x: locX, y: locY };
+    }
     const cx = dWRef.current / 2;
     const cy = dHRef.current / 2;
     return {
-      x: (rx - cx - panXRef.current) / zoomRef.current + cx,
-      y: (ry - cy - panYRef.current) / zoomRef.current + cy,
+      x: (locX - cx - panXRef.current) / zoomRef.current + cx,
+      y: (locY - cy - panYRef.current) / zoomRef.current + cy,
     };
   };
 
   const containerRef = useRef<View>(null);
-  const measureContainer = useCallback(() => {
-    containerRef.current?.measureInWindow?.((x: number, y: number) => {
-      containerPageX.current = x || 0;
-      containerPageY.current = y || 0;
-    });
-  }, []);
+  const measureContainer = useCallback(() => {}, []);
 
   // PanResponder only for 2-finger zoom/pan
   const panResponder = useRef(PanResponder.create({
@@ -89,7 +86,9 @@ export default function ResultsScreen() {
 
   const handleImageTap = useCallback((evt: any) => {
     if (modeRef.current !== 'add') return;
-    const p = touchToImage(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
+    const locX = evt.nativeEvent.locationX ?? 0;
+    const locY = evt.nativeEvent.locationY ?? 0;
+    const p = touchToImage(locX, locY);
     addMarker((p.x / dWRef.current) * 100, (p.y / dHRef.current) * 100);
   }, [addMarker]);
 
